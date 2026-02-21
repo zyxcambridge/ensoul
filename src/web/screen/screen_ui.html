@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ensoul - 大屏</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, "Helvetica Neue", "PingFang SC", sans-serif;
+    background: #000; color: #fff; overflow: hidden;
+    display: flex; flex-direction: column; align-items: center;
+    justify-content: center; height: 100vh;
+  }
+  h1 { font-size: 3rem; margin-bottom: 12px; letter-spacing: 0.1em; }
+  .subtitle { color: #666; font-size: 1.2rem; margin-bottom: 40px; }
+
+  .vote-bars { display: flex; gap: 48px; margin-bottom: 48px; }
+  .vote-col { display: flex; flex-direction: column; align-items: center; }
+  .vote-bar-track {
+    width: 80px; height: 300px; background: #111; border-radius: 40px;
+    position: relative; overflow: hidden;
+  }
+  .vote-bar-fill {
+    position: absolute; bottom: 0; width: 100%; border-radius: 40px;
+    transition: height 0.5s ease;
+  }
+  .vote-bar-fill.red   { background: #e53935; }
+  .vote-bar-fill.blue  { background: #1e88e5; }
+  .vote-bar-fill.green { background: #43a047; }
+  .vote-label { margin-top: 12px; font-size: 1.4rem; }
+  .vote-count { font-size: 2rem; font-weight: 700; margin-top: 4px; }
+
+  .check-panel {
+    display: flex; gap: 40px; margin-bottom: 40px;
+    opacity: 0; transition: opacity 0.5s;
+  }
+  .check-panel.visible { opacity: 1; }
+  .check-item {
+    text-align: center; font-size: 1.3rem;
+    padding: 16px 24px; border: 2px solid #333; border-radius: 12px;
+    min-width: 160px;
+  }
+  .check-item.ok { border-color: #43a047; color: #43a047; }
+  .check-item .icon { font-size: 2.4rem; }
+
+  #score {
+    font-size: 5rem; font-weight: 900;
+    opacity: 0; transition: opacity 0.6s;
+  }
+  #score.visible { opacity: 1; }
+
+  #phase-text {
+    font-size: 1.6rem; color: #aaa; margin-top: 20px;
+    min-height: 2em; text-align: center;
+  }
+</style>
+</head>
+<body>
+  <h1>ENSOUL</h1>
+  <p class="subtitle">镜像觉醒 Mirror Awakening</p>
+
+  <div class="vote-bars">
+    <div class="vote-col">
+      <div class="vote-bar-track"><div class="vote-bar-fill red" id="vb-red" style="height:0%"></div></div>
+      <span class="vote-label">红</span>
+      <span class="vote-count" id="vc-red">0</span>
+    </div>
+    <div class="vote-col">
+      <div class="vote-bar-track"><div class="vote-bar-fill blue" id="vb-blue" style="height:0%"></div></div>
+      <span class="vote-label">蓝</span>
+      <span class="vote-count" id="vc-blue">0</span>
+    </div>
+    <div class="vote-col">
+      <div class="vote-bar-track"><div class="vote-bar-fill green" id="vb-green" style="height:0%"></div></div>
+      <span class="vote-label">绿</span>
+      <span class="vote-count" id="vc-green">0</span>
+    </div>
+  </div>
+
+  <div class="check-panel" id="checks">
+    <div class="check-item" id="chk-body"><div class="icon">&#9744;</div><div class="label">本体感知</div></div>
+    <div class="check-item" id="chk-audio"><div class="icon">&#9744;</div><div class="label">语音回听</div></div>
+    <div class="check-item" id="chk-vision"><div class="icon">&#9744;</div><div class="label">镜像匹配</div></div>
+  </div>
+
+  <div id="score"></div>
+  <div id="phase-text"></div>
+
+<script>
+const ws = new WebSocket('ws://' + location.host + '/ws/screen');
+
+ws.onmessage = function(e) {
+  const msg = JSON.parse(e.data);
+  if (msg.state) updateVoteBars(msg.state);
+  if (msg.type === 'vote_locked') {
+    const colorMap = {red:'红色', blue:'蓝色', green:'绿色'};
+    document.getElementById('phase-text').textContent =
+      '最终颜色：' + (colorMap[msg.winner] || msg.winner);
+  }
+  if (msg.type === 'screen_event') handleScreenEvent(msg.event);
+};
+
+function updateVoteBars(s) {
+  var total = (s.red||0) + (s.blue||0) + (s.green||0) || 1;
+  ['red','blue','green'].forEach(function(c) {
+    var pct = ((s[c]||0)/total*100).toFixed(0);
+    document.getElementById('vb-'+c).style.height = pct+'%';
+    document.getElementById('vc-'+c).textContent = s[c]||0;
+  });
+}
+
+function handleScreenEvent(evt) {
+  var checks = document.getElementById('checks');
+  var scoreEl = document.getElementById('score');
+  var phase = document.getElementById('phase-text');
+
+  if (evt.indexOf('check:') === 0) {
+    checks.classList.add('visible');
+    var detail = evt.split(':')[1];
+    var mapping = {body_ok:'chk-body', audio_ok:'chk-audio', vision_ok:'chk-vision'};
+    var el = document.getElementById(mapping[detail]);
+    if (el) {
+      el.classList.add('ok');
+      el.querySelector('.icon').textContent = '\u2611';
+    }
+  }
+  if (evt.indexOf('score:') === 0) {
+    scoreEl.textContent = evt.split(':')[1];
+    scoreEl.classList.add('visible');
+  }
+  if (evt.indexOf('phase:') === 0) {
+    var p = evt.split(':')[1];
+    var labels = {
+      mirror_observe: '镜前观察中…',
+      aha_moment: '觉醒！',
+      end: '演示结束'
+    };
+    phase.textContent = labels[p] || p;
+  }
+  if (evt === 'wipe:success') {
+    phase.textContent = '擦除成功！';
+  }
+}
+</script>
+</body>
+</html>

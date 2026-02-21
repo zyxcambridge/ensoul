@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ensoul - 投票</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, "Helvetica Neue", "PingFang SC", sans-serif;
+    background: #0a0a0a; color: #fff;
+    display: flex; flex-direction: column; align-items: center;
+    justify-content: center; min-height: 100vh; padding: 20px;
+  }
+  h1 { font-size: 1.6rem; margin-bottom: 8px; }
+  p.sub { color: #888; font-size: 0.9rem; margin-bottom: 32px; }
+  .buttons { display: flex; gap: 16px; flex-wrap: wrap; justify-content: center; }
+  .btn {
+    width: 100px; height: 100px; border-radius: 50%;
+    border: 3px solid rgba(255,255,255,0.2);
+    font-size: 1rem; font-weight: 700; color: #fff;
+    cursor: pointer; transition: transform 0.2s, box-shadow 0.2s;
+  }
+  .btn:active { transform: scale(0.92); }
+  .btn.red   { background: #e53935; }
+  .btn.blue  { background: #1e88e5; }
+  .btn.green { background: #43a047; }
+  .btn:hover { box-shadow: 0 0 24px rgba(255,255,255,0.3); }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  #result {
+    margin-top: 32px; font-size: 1.2rem;
+    min-height: 1.5em; text-align: center;
+  }
+  .bar-wrap { width: 80%; max-width: 360px; margin-top: 24px; }
+  .bar-row { display: flex; align-items: center; margin-bottom: 8px; }
+  .bar-label { width: 50px; font-size: 0.85rem; }
+  .bar-track { flex: 1; height: 18px; background: #222; border-radius: 9px; overflow: hidden; }
+  .bar-fill { height: 100%; border-radius: 9px; transition: width 0.4s; }
+  .bar-fill.red   { background: #e53935; }
+  .bar-fill.blue  { background: #1e88e5; }
+  .bar-fill.green { background: #43a047; }
+  .bar-count { width: 36px; text-align: right; font-size: 0.85rem; }
+</style>
+</head>
+<body>
+  <h1>选择觉醒颜色</h1>
+  <p class="sub">你的投票将决定机器人的未知标记</p>
+  <div class="buttons">
+    <button class="btn red"   onclick="vote('red')"   id="btn-red">红</button>
+    <button class="btn blue"  onclick="vote('blue')"  id="btn-blue">蓝</button>
+    <button class="btn green" onclick="vote('green')" id="btn-green">绿</button>
+  </div>
+  <div id="result"></div>
+  <div class="bar-wrap">
+    <div class="bar-row">
+      <span class="bar-label">红</span>
+      <div class="bar-track"><div class="bar-fill red" id="bar-red" style="width:0%"></div></div>
+      <span class="bar-count" id="cnt-red">0</span>
+    </div>
+    <div class="bar-row">
+      <span class="bar-label">蓝</span>
+      <div class="bar-track"><div class="bar-fill blue" id="bar-blue" style="width:0%"></div></div>
+      <span class="bar-count" id="cnt-blue">0</span>
+    </div>
+    <div class="bar-row">
+      <span class="bar-label">绿</span>
+      <div class="bar-track"><div class="bar-fill green" id="bar-green" style="width:0%"></div></div>
+      <span class="bar-count" id="cnt-green">0</span>
+    </div>
+  </div>
+<script>
+const res = document.getElementById('result');
+let voted = false;
+
+async function vote(color) {
+  if (voted) return;
+  voted = true;
+  document.querySelectorAll('.btn').forEach(b => b.disabled = true);
+  res.textContent = '投票中…';
+  try {
+    const r = await fetch('/api/vote', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({color})
+    });
+    const d = await r.json();
+    if (d.ok) {
+      res.textContent = '已投票，等待结果…';
+      updateBars(d.state);
+    } else {
+      res.textContent = d.error || '投票失败';
+      voted = false;
+      document.querySelectorAll('.btn').forEach(b => b.disabled = false);
+    }
+  } catch(e) {
+    res.textContent = '网络错误';
+    voted = false;
+    document.querySelectorAll('.btn').forEach(b => b.disabled = false);
+  }
+}
+
+function updateBars(state) {
+  const total = (state.red||0) + (state.blue||0) + (state.green||0);
+  ['red','blue','green'].forEach(c => {
+    const cnt = state[c] || 0;
+    const pct = total > 0 ? (cnt/total*100).toFixed(0) : 0;
+    document.getElementById('bar-'+c).style.width = pct+'%';
+    document.getElementById('cnt-'+c).textContent = cnt;
+  });
+}
+
+// Poll for updates
+setInterval(async () => {
+  try {
+    const r = await fetch('/api/vote', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({color:'_poll'})});
+  } catch(e) {}
+}, 60000);
+</script>
+</body>
+</html>

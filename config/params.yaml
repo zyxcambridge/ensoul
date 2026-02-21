@@ -1,0 +1,22 @@
+awakening:
+  ros__parameters:
+    vote_timeout_sec: 30
+    allowed_colors: ["red", "blue", "green"]
+    triple_check:
+      body_threshold: 0.8
+      audio_threshold: 0.7
+      vision_threshold: 0.85
+      fusion_weight_body: 0.2
+      fusion_weight_audio: 0.2
+      fusion_weight_vision: 0.6
+      pass_score: 0.80
+    wipe_action:
+      primary_trajectory: "head_touch_front"
+      fallback_trajectory: "head_touch_conservative"
+      max_retries: 2
+    speech:
+      language: "zh-CN"
+      tts_engine: "edge-tts"
+    screen:
+      websocket_port: 8765
+      update_interval_ms: 200
