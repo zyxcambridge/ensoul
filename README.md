@@ -10,6 +10,20 @@
 
 **核心理念**：用经典心理学"镜子测试"+ 观众互动的"未知输入"，让机器人在现场完成从"我不知道镜中是谁"到"那就是我"的推理过程。
 
+## ensoul 共建计划（网站）
+
+项目已提供 GitHub Pages 首页文件：`index.html`。  
+启用后可直接访问：`https://zyxcambridge.github.io/ensoul/`
+
+### 一键开启 Pages（无需改代码）
+
+1. 打开仓库 `Settings` → `Pages`
+2. `Build and deployment` 中选择 `Deploy from a branch`
+3. Branch 选择 `main`，目录选择 `/ (root)`，点击 `Save`
+4. 等待 1-3 分钟后刷新链接即可访问网站
+
+网站内容包括：项目愿景、你正在做的事情、参与方式、联系方式和版权信息。
+
 ## 目录结构
 
 ```
