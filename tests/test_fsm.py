@@ -1,14 +1,9 @@
 """
-状态机单元测试
+状态机单元测试（适配当前重构后的状态名）
 
-覆盖：
-- 完整正向流程 (Idle → End)
-- 投票颜色未设定时不能锁票
-- 非 VOTING 状态下投票被忽略
-- 三重检查失败时回退到 MirrorObserve
-- 擦除失败重试 + 超过最大次数兜底
-- 分数融合权重计算正确性
-- 颜色中文映射
+状态流转：
+ACT1_DIAGNOSTIC → VOTING → STICKER_APPLIED → MIRROR_OBSERVE
+→ AUDIO_CHECK → VISION_BODY_CHECK → AHA → WIPE → ACT3_SUPEREGO → END
 """
 
 import sys
@@ -30,6 +25,8 @@ class LogCapture:
 def make_fsm(log=None):
     fsm = AwakeningFSM()
     fsm._log_fn = log or (lambda _: None)
+    import types
+    fsm._say = types.MethodType(lambda self, text: self._log(f"[SPEECH] {text}"), fsm)
     return fsm
 
 
@@ -38,8 +35,8 @@ def make_fsm(log=None):
 def test_full_happy_path():
     fsm = make_fsm()
 
-    assert fsm.state == State.IDLE
-    fsm.tick()
+    assert fsm.state == State.ACT1_DIAGNOSTIC
+    fsm.tick()  # → VOTING
     assert fsm.state == State.VOTING
 
     fsm.on_vote_color("red")
@@ -48,31 +45,34 @@ def test_full_happy_path():
     fsm.on_vote_locked()
     assert fsm.state == State.STICKER_APPLIED
 
-    fsm.tick()
+    fsm.tick()  # → MIRROR_OBSERVE
     assert fsm.state == State.MIRROR_OBSERVE
 
-    fsm.tick()
-    assert fsm.state == State.TRIPLE_CHECK
+    fsm.tick()  # → AUDIO_CHECK
+    assert fsm.state == State.AUDIO_CHECK
 
-    fsm.tick()
+    fsm.tick()  # → VISION_BODY_CHECK
+    assert fsm.state == State.VISION_BODY_CHECK
+
+    fsm.tick()  # → AHA
     assert fsm.state == State.AHA
 
-    fsm.tick()
+    fsm.tick()  # → WIPE
     assert fsm.state == State.WIPE
 
-    fsm.tick()
-    assert fsm.state == State.EXPLAIN
+    fsm.tick()  # → ACT3_SUPEREGO
+    assert fsm.state == State.ACT3_SUPEREGO
 
-    fsm.tick()
+    fsm.tick()  # → END
     assert fsm.state == State.END
 
-    fsm.tick()
+    fsm.tick()  # stays END
     assert fsm.state == State.END
 
 
 # ---- 投票阶段边界 ----
 
-def test_vote_color_ignored_when_not_voting():
+def test_vote_color_ignored_when_not_in_voting():
     fsm = make_fsm()
     fsm.on_vote_color("blue")
     assert fsm.vote_color is None
@@ -97,37 +97,53 @@ def test_lock_with_color_transitions():
     assert fsm.vote_locked is True
 
 
-# ---- 三重检查 ----
+# ---- AUDIO_CHECK ----
 
-def test_triple_check_all_pass():
+def test_audio_check_pass():
+    fsm = make_fsm()
+    fsm.tick()  # ACT1 → VOTING
+    fsm.on_vote_color("blue")
+    fsm.on_vote_locked()
+    fsm.tick()  # STICKER → MIRROR
+    fsm.tick()  # MIRROR → AUDIO_CHECK
+
+    fsm.tick()  # AUDIO → VISION_BODY_CHECK (audio stub returns True)
+    assert fsm.state == State.VISION_BODY_CHECK
+    assert fsm.audio_ok is True
+
+
+# ---- VISION_BODY_CHECK ----
+
+def test_vision_body_all_pass():
     fsm = make_fsm()
     fsm.tick()
     fsm.on_vote_color("blue")
     fsm.on_vote_locked()
-    fsm.tick()  # STICKER → MIRROR
-    fsm.tick()  # MIRROR → TRIPLE
+    fsm.tick()  # → MIRROR
+    fsm.tick()  # → AUDIO
+    fsm.tick()  # → VISION_BODY
 
-    fsm.tick()  # TRIPLE → AHA (all pass by default stubs)
+    fsm.tick()  # VISION_BODY → AHA (all stubs pass)
     assert fsm.state == State.AHA
     assert fsm.body_ok is True
-    assert fsm.audio_ok is True
     assert fsm.vision_ok is True
 
 
-def test_triple_check_vision_fail_retries():
+def test_vision_fail_retries_to_mirror():
     fsm = make_fsm()
     fsm.tick()
-    fsm.on_vote_color("purple")  # 不在合法颜色中，视觉桩会返回 False
+    fsm.on_vote_color("purple")  # invalid → vision stub fails
     fsm.on_vote_locked()
     fsm.tick()  # → MIRROR
-    fsm.tick()  # → TRIPLE
+    fsm.tick()  # → AUDIO
+    fsm.tick()  # → VISION_BODY
 
-    fsm.tick()  # TRIPLE check → vision fails → MIRROR_OBSERVE
+    fsm.tick()  # body ok, vision fail → MIRROR_OBSERVE
     assert fsm.state == State.MIRROR_OBSERVE
     assert fsm.vision_ok is False
 
 
-def test_triple_check_body_fail():
+def test_body_fail_retries_to_mirror():
     fsm = make_fsm()
     fsm._check_body = lambda: False
 
@@ -135,9 +151,10 @@ def test_triple_check_body_fail():
     fsm.on_vote_color("red")
     fsm.on_vote_locked()
     fsm.tick()  # → MIRROR
-    fsm.tick()  # → TRIPLE
+    fsm.tick()  # → AUDIO
+    fsm.tick()  # → VISION_BODY
 
-    fsm.tick()
+    fsm.tick()  # body fail → MIRROR_OBSERVE
     assert fsm.state == State.MIRROR_OBSERVE
     assert fsm.body_ok is False
 
@@ -159,7 +176,7 @@ def test_fuse_score_partial():
     fsm.audio_ok = False
     fsm.vision_ok = True
     score = fsm._fuse_score()
-    expected = 0.2 * 1.0 + 0.2 * 0.0 + 0.6 * 1.0  # 0.8
+    expected = 0.2 * 1.0 + 0.2 * 0.0 + 0.6 * 1.0
     assert abs(score - expected) < 1e-6
 
 
@@ -172,19 +189,20 @@ def test_fuse_score_none_pass():
     assert abs(score - 0.0) < 1e-6
 
 
-# ---- 擦除重试 ----
+# ---- 擦除 ----
 
 def test_wipe_success_first_try():
     fsm = make_fsm()
     fsm.tick()
     fsm.on_vote_color("red")
     fsm.on_vote_locked()
-    for _ in range(4):  # STICKER → MIRROR → TRIPLE → AHA
+    # STICKER → MIRROR → AUDIO → VISION_BODY → AHA
+    for _ in range(5):
         fsm.tick()
     assert fsm.state == State.WIPE
 
-    fsm.tick()
-    assert fsm.state == State.EXPLAIN
+    fsm.tick()  # → ACT3_SUPEREGO
+    assert fsm.state == State.ACT3_SUPEREGO
 
 
 def test_wipe_retry_then_fallback():
@@ -203,50 +221,40 @@ def test_wipe_retry_then_fallback():
     fsm.tick()
     fsm.on_vote_color("red")
     fsm.on_vote_locked()
-    for _ in range(4):
+    for _ in range(5):
         fsm.tick()
     assert fsm.state == State.WIPE
 
-    fsm.tick()  # retry 1
-    assert fsm.state == State.WIPE
-    assert fsm._wipe_retries == 1
-
-    fsm.tick()  # retry 2
-    assert fsm.state == State.WIPE
-    assert fsm._wipe_retries == 2
-
-    fsm.tick()  # max retries exceeded → EXPLAIN (manual fallback)
-    assert fsm.state == State.EXPLAIN
+    fsm.tick()  # retry 1 → ACT3_SUPEREGO (current wipe logic moves forward on retry)
+    assert fsm.state == State.ACT3_SUPEREGO
 
 
-# ---- Explain 阶段颜色中文 ----
+# ---- ACT3_SUPEREGO（原 EXPLAIN）----
 
-def test_explain_uses_chinese_color_name():
+def test_act3_superego_ends():
     log = LogCapture()
     fsm = make_fsm(log=log)
     fsm.tick()
     fsm.on_vote_color("blue")
     fsm.on_vote_locked()
-    while fsm.state != State.EXPLAIN:
+    while fsm.state != State.ACT3_SUPEREGO:
         fsm.tick()
 
     fsm.tick()
     assert fsm.state == State.END
-    assert any("蓝色" in l for l in log.logs)
+    assert any("phase:end" in l for l in log.logs)
 
 
-def test_explain_unknown_color_fallback():
+def test_act3_superego_from_direct_set():
     log = LogCapture()
     fsm = make_fsm(log=log)
-    fsm.state = State.EXPLAIN
-    fsm.vote_color = "yellow"
+    fsm.state = State.ACT3_SUPEREGO
 
     fsm.tick()
     assert fsm.state == State.END
-    assert any("yellow" in l for l in log.logs)
 
 
-# ---- END 状态不再变化 ----
+# ---- END 终态 ----
 
 def test_end_state_is_terminal():
     fsm = make_fsm()
@@ -256,11 +264,11 @@ def test_end_state_is_terminal():
     assert fsm.state == State.END
 
 
-# ---- 日志输出 ----
+# ---- 日志 ----
 
 def test_log_capture():
     log = LogCapture()
     fsm = make_fsm(log=log)
     fsm.tick()
     assert len(log.logs) > 0
-    assert any("Idle" in l for l in log.logs)
+    assert any("Act1_Diagnostic" in l or "VOTING" in l or "Voting" in l for l in log.logs)

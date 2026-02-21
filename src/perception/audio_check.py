@@ -1,9 +1,9 @@
 """
-语音回听模块 —— 确认"我听到了自己的声音"
+语音回听模块 (Perception Node - Audio Check)
 
-利用 G1 的 4 麦克风阵列，检测最近 N 秒内
-是否捕获到与机器人自身 TTS 输出匹配的音频。
-ROS2 话题: /rt/audio_msg
+实现 PRD 4.2 听觉子模块要求：
+订阅 /g1/mic_asr（语音识别）和内部 TTS 状态。
+执行比对逻辑（发声状态 == True 且 监听到自身文本）。
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ from dataclasses import dataclass
 try:
     import rclpy
     from rclpy.node import Node
-    from std_msgs.msg import String
+    from std_msgs.msg import String, Bool
 
     HAS_ROS2 = True
 except ImportError:
@@ -27,11 +27,15 @@ class AudioCheckResult:
     confidence: float
 
 
-def evaluate_audio(transcript: str, expected_keywords: list[str], threshold: float = 0.7) -> AudioCheckResult:
+def evaluate_audio(transcript: str, tts_is_playing: bool, expected_keywords: list[str], threshold: float = 0.5) -> AudioCheckResult:
     """
-    简单关键词匹配：如果 transcript 中包含 expected_keywords 的比例超过阈值，
+    PRD逻辑：发声状态 == True 且 监听到自身文本。
+    如果 transcript 中包含 expected_keywords 的比例超过阈值，并且 TTS 正在发声，
     则认为机器人"听到了自己"。
     """
+    if not tts_is_playing:
+        return AudioCheckResult(heard_self=False, transcript=transcript, confidence=0.0)
+
     if not expected_keywords:
         return AudioCheckResult(heard_self=False, transcript=transcript, confidence=0.0)
 
@@ -44,7 +48,8 @@ def evaluate_audio(transcript: str, expected_keywords: list[str], threshold: flo
     )
 
 
-SELF_KEYWORDS = ["不确定", "不知道", "镜子", "标记"]
+# 预期自己刚说过的关键词
+SELF_KEYWORDS = ["不知"]
 
 
 if HAS_ROS2:
@@ -53,9 +58,23 @@ if HAS_ROS2:
         def __init__(self) -> None:
             super().__init__("audio_check")
             self.latest_result: AudioCheckResult | None = None
-            self.sub = self.create_subscription(
-                String, "/rt/audio_transcript", self._on_transcript, 10
+            self.tts_is_playing: bool = False
+            
+            # 订阅麦克风 ASR 结果
+            self.sub_asr = self.create_subscription(
+                String, "/g1/mic_asr", self._on_transcript, 10
+            )
+            # 订阅 TTS 状态
+            self.sub_tts = self.create_subscription(
+                Bool, "/g1/tts_status", self._on_tts_status, 10
             )
 
+        def _on_tts_status(self, msg: Bool) -> None:
+            self.tts_is_playing = msg.data
+
         def _on_transcript(self, msg: String) -> None:
-            self.latest_result = evaluate_audio(msg.data, SELF_KEYWORDS)
+            self.latest_result = evaluate_audio(
+                msg.data, 
+                self.tts_is_playing, 
+                SELF_KEYWORDS
+            )

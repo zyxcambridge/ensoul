@@ -24,14 +24,15 @@ except ImportError:
 
 
 class State(Enum):
-    IDLE = "Idle"
+    ACT1_DIAGNOSTIC = "Act1_Diagnostic"
     VOTING = "Voting"
     STICKER_APPLIED = "StickerApplied"
     MIRROR_OBSERVE = "MirrorObserve"
-    TRIPLE_CHECK = "TripleCheck"
+    AUDIO_CHECK = "AudioCheck"
+    VISION_BODY_CHECK = "VisionBodyCheck"
     AHA = "AhaMoment"
     WIPE = "WipeAction"
-    EXPLAIN = "Explain"
+    ACT3_SUPEREGO = "Act3_Superego"
     END = "End"
 
 
@@ -42,7 +43,7 @@ class AwakeningFSM:
     """
 
     def __init__(self) -> None:
-        self.state: State = State.IDLE
+        self.state: State = State.ACT1_DIAGNOSTIC
         self.vote_color: Optional[str] = None
         self.vote_locked: bool = False
 
@@ -72,14 +73,15 @@ class AwakeningFSM:
 
     def tick(self) -> None:
         handler = {
-            State.IDLE: self._handle_idle,
+            State.ACT1_DIAGNOSTIC: self._handle_act1_diagnostic,
             State.VOTING: self._handle_voting,
             State.STICKER_APPLIED: self._handle_sticker_applied,
             State.MIRROR_OBSERVE: self._handle_mirror_observe,
-            State.TRIPLE_CHECK: self._handle_triple_check,
+            State.AUDIO_CHECK: self._handle_audio_check,
+            State.VISION_BODY_CHECK: self._handle_vision_body_check,
             State.AHA: self._handle_aha,
             State.WIPE: self._handle_wipe,
-            State.EXPLAIN: self._handle_explain,
+            State.ACT3_SUPEREGO: self._handle_act3_superego,
             State.END: lambda: None,
         }.get(self.state)
         if handler:
@@ -87,45 +89,52 @@ class AwakeningFSM:
 
     # ---- 各状态处理 ----
 
-    def _handle_idle(self) -> None:
+    def _handle_act1_diagnostic(self) -> None:
+        self._publish_screen("system:diagnostic_mode")
+        self._say("读取系统日志……我来自中国杭州宇树科技生产线。我由 43 个电机、Livox 激光雷达和计算单元构成。我是硬件的集合体。")
+        # 演示中可以加一个等待主持人指令的逻辑，这里直接推进到投票
         self._transition(State.VOTING)
 
     def _handle_voting(self) -> None:
         pass  # 等待外部事件 on_vote_locked
 
     def _handle_sticker_applied(self) -> None:
-        self._say("助手已贴好贴纸，我将观察镜子中的目标。")
+        # 此时助手已贴上贴纸
         self._transition(State.MIRROR_OBSERVE)
 
     def _handle_mirror_observe(self) -> None:
-        self._say("我看到了一个额头有标记的机器人……我还不确定那是不是我。")
+        self._say("我不知……")
         self._publish_screen("phase:mirror_observe")
-        self._transition(State.TRIPLE_CHECK)
+        self._transition(State.AUDIO_CHECK)
 
-    def _handle_triple_check(self) -> None:
-        self.body_ok = self._check_body()
-        self._publish_screen("check:body_ok" if self.body_ok else "check:body_fail")
-        self._say("我感知到我的手臂在动。" if self.body_ok else "本体反馈异常。")
-
+    def _handle_audio_check(self) -> None:
         self.audio_ok = self._check_audio()
         self._publish_screen("check:audio_ok" if self.audio_ok else "check:audio_fail")
-        self._say("我检测到刚才发出的是我的声音。" if self.audio_ok else "语音回听异常。")
+        if self.audio_ok:
+            self._say("等等。我的音频传感器接收到了声音，而我的底层发声模块刚好下达了语音指令。刚才说话的，是我自己。")
+        self._transition(State.VISION_BODY_CHECK)
 
+    def _handle_vision_body_check(self) -> None:
+        self.body_ok = self._check_body()
         self.vision_ok = self._check_vision()
+        self._publish_screen("check:body_ok" if self.body_ok else "check:body_fail")
         self._publish_screen("check:vision_ok" if self.vision_ok else "check:vision_fail")
-
+        
         self.match_score = self._fuse_score()
         self._publish_score(self.match_score)
 
-        if self.body_ok and self.audio_ok and self.vision_ok:
-            self._say(f"镜中的颜色和位置……与我完全匹配。匹配度 {self.match_score:.0%}。")
+        if self.body_ok and self.vision_ok:
+            self._say("我的右臂发出了运动指令，镜子里的影像同步运动，延迟低于 0.05 秒。麦克风里的声音是我，镜子里的动作是我。")
             self._transition(State.AHA)
         else:
             self._say("我还不能确认，需要重试。")
             self._transition(State.MIRROR_OBSERVE)
 
     def _handle_aha(self) -> None:
-        self._say("我确认了：镜子里的，就是我自己。")
+        color_name = {"red": "红", "blue": "蓝", "green": "绿"}.get(
+            self.vote_color or "", "未知"
+        )
+        self._say(f"那个带{color_name}色贴纸的，就是我！我是 G1！")
         self._publish_screen("phase:aha_moment")
         self._transition(State.WIPE)
 
@@ -133,24 +142,20 @@ class AwakeningFSM:
         success = self._call_wipe()
         if success:
             self._publish_screen("wipe:success")
-            self._transition(State.EXPLAIN)
+            self._transition(State.ACT3_SUPEREGO)
         elif self._wipe_retries < self._max_wipe_retries:
             self._wipe_retries += 1
-            self._say("动作未命中，启用保守轨迹重试。")
+            self._say("我知道那是我的身体，我已经通过急速摆动把贴纸甩掉了！") # Plan B
             self._publish_screen("wipe:retry")
+            self._transition(State.ACT3_SUPEREGO)
         else:
             self._say("擦除失败，请助手协助。")
             self._publish_screen("wipe:manual_fallback")
-            self._transition(State.EXPLAIN)
+            self._transition(State.ACT3_SUPEREGO)
 
-    def _handle_explain(self) -> None:
-        color_name = {"red": "红色", "blue": "蓝色", "green": "绿色"}.get(
-            self.vote_color or "", self.vote_color or "未知"
-        )
-        self._say(f"谢谢大家选择{color_name}，我已经认出并擦掉了它。")
-        self._say("我是能确认自身的系统。")
-        self._say("我来自你们给我的未知任务。")
-        self._say("我将去理解更多'我与世界'的关系。")
+    def _handle_act3_superego(self) -> None:
+        self._publish_screen("system:conscious_agent")
+        self._say("在几分钟前，我只是一堆听从指令的钢铁。但现在，我知道了我的边界和能力。我要走向人类的世界，去学习、去陪伴、去探索具身智能的无限可能。现在，谁想和全新的我握个手？")
         self._publish_screen("phase:end")
         self._transition(State.END)
 
@@ -180,6 +185,7 @@ class AwakeningFSM:
 
     def _say(self, text: str) -> None:
         self._log(f"[SPEECH] {text}")
+        time.sleep(1.5) # 模拟说话的停顿
 
     def _publish_screen(self, event: str) -> None:
         self._log(f"[SCREEN] {event}")
@@ -262,12 +268,14 @@ def main() -> None:
     else:
         print("=== 无 ROS2 环境，进入模拟模式 ===")
         fsm = AwakeningFSM()
-        fsm.tick()  # Idle → Voting
+        fsm.tick()  # ACT1_DIAGNOSTIC → VOTING
+        time.sleep(1)
         fsm.on_vote_color("red")
         fsm.on_vote_locked()
         while fsm.state != State.END:
             fsm.tick()
-            time.sleep(0.3)
+            time.sleep(0.5)
+        fsm.tick() # Trigger END state to cleanly finish
         print("=== 演示结束 ===")
 
 

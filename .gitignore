@@ -1,7 +1,6 @@
 __pycache__/
 *.pyc
 *.pyo
-.env
 *.egg-info/
 dist/
 build/
@@ -12,3 +11,12 @@ node_modules/
 *.log
 .idea/
 .vscode/
+
+# === 密钥保护（多重防护） ===
+.env
+.env.local
+.env.*.local
+*.key
+*.pem
+secrets/
+credentials.json

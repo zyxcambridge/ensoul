@@ -1,8 +1,9 @@
 """
-本体感知模块 —— 关节反馈检测
+本体感知模块 (Perception Node - Body Check)
 
-通过读取 G1 关节传感器数据，确认"我的手臂确实在动"。
-ROS2 话题: /rt/joint_states (sensor_msgs/JointState)
+实现 PRD 4.2 本体子模块要求：
+订阅 /g1/joint_states，比对视觉光流与本体运动指令。
+确认"我的手臂确实在动"。
 """
 
 from __future__ import annotations
